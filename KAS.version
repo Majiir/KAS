@@ -1,0 +1,14 @@
+{
+  "NAME": "KAS",
+  "URL": "https://raw.githubusercontent.com/Majiir/KAS/master/KAS.version",
+  "VERSION": {
+    "MAJOR": 0,
+    "MINOR": 4,
+    "PATCH": 6
+  },
+  "KSP_VERSION": {
+    "MAJOR": 0,
+    "MINOR": 23,
+    "PATCH": 5
+  }
+}
