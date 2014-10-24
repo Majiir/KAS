@@ -248,12 +248,11 @@ namespace KAS
             }
         }
 
-        protected override void OnJointBreak(float breakForce)
+        public override void OnJointBreakFixed()
         {
             KAS_Shared.DebugWarning("OnJointBreak(Strut) A joint broken on " + part.partInfo.title + " !, force: " + breakForce);
             Unlink();
             fxSndBroke.audio.Play();
-            base.OnJointBreak(breakForce);
         }
 
         public void OnPartGrab(Vessel kerbalEvaVessel)
@@ -315,7 +314,7 @@ namespace KAS
             {
                 if (!CheckLink(this.strutTransform, tgtModule.strutTransform, true))
                 {
-                    ScreenMessages.PostScreenMessage("Max angle or lenght reached, cannot link !", 5, ScreenMessageStyle.UPPER_CENTER);
+                    ScreenMessages.PostScreenMessage("Max angle or length reached, cannot link !", 5, ScreenMessageStyle.UPPER_CENTER);
                     return false;
                 }
 
@@ -555,7 +554,7 @@ namespace KAS
             else
             {
                 SetEvaLink();
-                ScreenMessages.PostScreenMessage("Link mode enabled, press Echap or Enter to cancel", 10, ScreenMessageStyle.UPPER_CENTER);
+                ScreenMessages.PostScreenMessage("Link mode enabled, press Escape or Enter to cancel", 10, ScreenMessageStyle.UPPER_CENTER);
             }
         }
 

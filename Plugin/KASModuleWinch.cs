@@ -1161,11 +1161,13 @@ namespace KAS
             if (headState == PlugState.Locked && ejectEnabled)
             {
                 Deploy();
+                retract.full = false;
                 cableJointLength = maxLenght;
                 Vector3 force = winchAnchorNode.TransformDirection(Vector3.forward) * ejectForce;
                 if (connectedPortInfo.module)
                 {
-                    connectedPortInfo.module.part.Rigidbody.AddForce(force, ForceMode.Force);
+                    //connectedPortInfo.module.part.Rigidbody.AddForce(force, ForceMode.Force);
+                    StartCoroutine(WaitAndApplyForce(force));
                 }
                 else
                 {
@@ -1174,6 +1176,13 @@ namespace KAS
                 this.part.Rigidbody.AddForce(-force, ForceMode.Force);
                 fxSndEject.audio.Play();
             }
+        }
+
+        // X64 fix for eject
+        private IEnumerator WaitAndApplyForce(Vector3 force)
+        {
+            yield return new WaitForFixedUpdate();
+            connectedPortInfo.module.part.Rigidbody.AddForce(force, ForceMode.Force);
         }
 
         private bool IsLockable()

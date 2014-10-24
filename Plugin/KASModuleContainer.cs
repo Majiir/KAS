@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Collections;
@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace KAS
 {
-    public class KASModuleContainer : PartModule
+    public class KASModuleContainer : PartModule, IPartCostModifier
     {
         [KSPField] public float maxSize = 10f;
         [KSPField] public float maxOpenDistance = 2f;
@@ -30,6 +30,7 @@ namespace KAS
             public int totalCount { get { return pristine_count + instances.Count; } }
             public float totalSize { get { return storedSize * totalCount; } }
             public float totalMass { get { return pristine_mass * pristine_count + instance_mass; } }
+            public float totalCost { get { return pristine_cost * pristine_count + instance_cost; } }
 
             public float averageMass
             {
@@ -40,10 +41,19 @@ namespace KAS
                 }
             }
 
-            public readonly float pristine_mass;
+            public float averageCost
+            {
+                get
+                {
+                    int count = totalCount;
+                    return count > 0 ? totalCost / count : pristine_cost;
+                }
+            }
+
+            public readonly float pristine_mass, pristine_cost;
             public int pristine_count;
 
-            public float instance_mass;
+            public float instance_mass, instance_cost;
             public readonly List<ConfigNode> instances = new List<ConfigNode>();
 
             private PartContent(AvailablePart avPart, KASModuleGrab grab)
@@ -51,10 +61,12 @@ namespace KAS
                 part = avPart;
                 grabModule = grab;
                 pristine_mass = part.partPrefab.mass;
+                pristine_cost = part.cost + part.partPrefab.GetModuleCosts();
 
                 foreach (var res in part.partPrefab.GetComponents<PartResource>())
                 {
                     pristine_mass += (float)(res.amount * res.info.density);
+                    pristine_cost += (float)(res.amount - res.maxAmount) * res.info.unitCost;
                 }
             }
 
@@ -91,7 +103,19 @@ namespace KAS
                 {
                     ConfigNode nodeD = new ConfigNode();
                     node.CopyTo(nodeD);
-                    instance_mass += float.Parse(node.GetValue("kas_total_mass"));
+
+                    // Backward compatibility: compute the cost and save it
+                    if (!nodeD.HasValue("kas_total_cost"))
+                    {
+                        var snapshot = KAS_Shared.LoadProtoPartSnapshot(nodeD);
+
+                        float dry_cost, fuel_cost;
+                        float total_cost = ShipConstruction.GetPartCosts(snapshot, part, out dry_cost, out fuel_cost);
+                        nodeD.AddValue("kas_total_cost", total_cost);
+                    }
+
+                    instance_mass += float.Parse(nodeD.GetValue("kas_total_mass"));
+                    instance_cost += float.Parse(nodeD.GetValue("kas_total_cost"));
                     instances.Add(nodeD);
                 }
             }
@@ -108,6 +132,18 @@ namespace KAS
                 {
                     ConfigNode nodeD = node.AddNode("CONTENT_PART");
                     inst.CopyTo(nodeD);
+
+                    // Science recovery works by retrieving all MODULE/ScienceData
+                    // subnodes from the part node, so copy all experiments from
+                    // contained parts to where it expects to find them.
+                    // This duplicates data but allows recovery to work properly.
+                    foreach (var module in inst.GetNodes("MODULE"))
+                    {
+                        foreach (var experiment in module.GetNodes("ScienceData"))
+                        {
+                            experiment.CopyTo(node.AddNode("ScienceData"));
+                        }
+                    }
                 }
             }
 
@@ -116,6 +152,8 @@ namespace KAS
                 ConfigNode node = instances[0];
                 float mass = float.Parse(node.GetValue("kas_total_mass"));
                 instance_mass -= mass;
+                float cost = float.Parse(node.GetValue("kas_total_cost"));
+                instance_cost -= cost;
                 instances.RemoveAt(0);
                 return node;
             }
@@ -123,7 +161,7 @@ namespace KAS
 
         public Dictionary<string, PartContent> availableContents = new Dictionary<string, PartContent>();
         public Dictionary<string, PartContent> contents = new Dictionary<string, PartContent>();
-
+        
         private KASModuleContainer exchangeContainer = null;
         public float totalSize = 0;
         private bool waitAndGrabRunning = false;
@@ -184,6 +222,10 @@ namespace KAS
         public override void OnLoad(ConfigNode node)
         {
             base.OnLoad(node);
+
+            // Do not load ScienceData nodes for this module's host part (a KAS container) as
+            // they were only stored in case the vessel was recovered. The original parts still
+            // contain the science data. (See PartContent.Save)
 
             if (node.HasNode("CONTENT") || node.HasNode("CONTENT_PART"))
             {
@@ -292,6 +334,8 @@ namespace KAS
                 item.pristine_count += qty;
                 RefreshTotalSize();
             }
+
+            GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
         }
 
         private void Remove(AvailablePart avPart, int qty)
@@ -301,6 +345,8 @@ namespace KAS
             {
                 item.pristine_count = Math.Max(0, item.pristine_count - qty);
                 RefreshTotalSize();
+
+                GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
             }
             else
             {
@@ -645,6 +691,7 @@ namespace KAS
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(new GUIContent("Close", "Close container"), guiButtonStyle, GUILayout.Width(60f)))
             {
+                this.activeEditTab = EditTab.All;
                 CloseAllGUI();
                 fxSndClose.audio.Play();
             }
@@ -741,9 +788,10 @@ namespace KAS
             foreach (PartContent item in contentsList.Values)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label(new GUIContent("  " + item.part.title, "Name"), guiCenterStyle, GUILayout.Width(300f));
-                GUILayout.Label(new GUIContent("  " + item.storedSize.ToString("0.0"), "Size"), guiCenterStyle, GUILayout.Width(50f));
-                GUILayout.Label(new GUIContent("  " + item.averageMass.ToString("0.000"), "Mass"), guiCenterStyle, GUILayout.Width(50f));
+                GUILayout.Label(new GUIContent("  " + item.part.title, "Name"), guiCenterStyle, GUILayout.Width(280f));
+                GUILayout.Label(new GUIContent("  " + item.storedSize.ToString("0.0"), "Size"), guiCenterStyle, GUILayout.Width(40f));
+                GUILayout.Label(new GUIContent("  " + item.averageMass.ToString("0.000"), "Mass"), guiCenterStyle, GUILayout.Width(40f));
+                GUILayout.Label(new GUIContent("  " + item.averageCost.ToString("0"), "Cost"), guiCenterStyle, GUILayout.Width(40f));
                 GUILayout.Label(new GUIContent("  " + item.totalCount, "Quantity"), guiCenterStyle, GUILayout.Width(50f));
                 if (showButton == ShowButton.Add)
                 {
@@ -809,6 +857,7 @@ namespace KAS
 
                 GUILayout.Label(new GUIContent("Weight : " + actionContainer.part.mass.ToString("0.000"), "Total weight of the container with contents"), guiRightWhiteStyle);
                 GUILayout.Label(new GUIContent(" | Space : " + actionContainer.totalSize.ToString("0.0") + " / " + actionContainer.maxSize.ToString("0.0"), "Space used / Max space"), guiRightWhiteStyle);
+                GUILayout.Label(new GUIContent(" | Cost : √" + actionContainer.GetModuleCost().ToString("0.00"), "Total cost of the container's contents"), guiRightWhiteStyle);
                 GUILayout.EndHorizontal();
                 GUILayout.EndVertical();
             }
@@ -828,5 +877,21 @@ namespace KAS
                 ViewContents();
             }           
         }
+
+        #region IPartCostModifier Implementation
+
+        public float GetModuleCost()
+        {
+            float result = 0.0f;
+
+            foreach (PartContent item in contents.Values)
+            {
+                result += item.totalCost;
+            }
+
+            return result;
+        }
+
+        #endregion
     }
 }

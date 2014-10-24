@@ -554,7 +554,7 @@ namespace KAS
             {
                 ConfigNode node = new ConfigNode();
                 node.AddValue("name", newPart.Modules[i].moduleName);
-                newPart.LoadModule(node, i);
+                newPart.LoadModule(node, ref i);
             }
 
             return newPart;
@@ -574,7 +574,10 @@ namespace KAS
 
             snapshot.Save(node);
 
+            float dry_cost, fuel_cost;
+            float total_cost = ShipConstruction.GetPartCosts(snapshot, part.partInfo, out dry_cost, out fuel_cost);
             node.AddValue("kas_total_mass", part.mass+part.GetResourceMass());
+            node.AddValue("kas_total_cost", total_cost);
 
             // Prune unimportant data
             node.RemoveValues("parent");
@@ -647,14 +650,20 @@ namespace KAS
             }
         }
 
-        public static Part LoadPartSnapshot(Vessel vessel, ConfigNode node, Vector3 position, Quaternion rotation)
+        public static ProtoPartSnapshot LoadProtoPartSnapshot(ConfigNode node)
         {
             ConfigNode node_copy = new ConfigNode();
             node.CopyTo(node_copy);
 
             node_copy.RemoveValues("kas_total_mass");
+            node_copy.RemoveValues("kas_total_cost");
 
-            ProtoPartSnapshot snapshot = new ProtoPartSnapshot(node_copy, null, HighLogic.CurrentGame);
+            return new ProtoPartSnapshot(node_copy, null, HighLogic.CurrentGame);
+        }
+
+        public static Part LoadPartSnapshot(Vessel vessel, ConfigNode node, Vector3 position, Quaternion rotation)
+        {
+            ProtoPartSnapshot snapshot = KAS_Shared.LoadProtoPartSnapshot(node);
 
             if (HighLogic.CurrentGame.flightState.ContainsFlightID(snapshot.flightID))
                 snapshot.flightID = ShipConstruction.GetUniqueFlightID(HighLogic.CurrentGame.flightState);
